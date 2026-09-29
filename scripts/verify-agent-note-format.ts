@@ -1,7 +1,8 @@
 /**
  * Enforce Agent Note headers, lifecycle-specific sections, alternatives.
  * Implemented notes may not carry proposal-era H2s; present tense in the
- * body is a prose rule, not a lexical scan.
+ * body is a prose rule, not a lexical scan. A pre-format (imported) note
+ * may carry the legacy alternatives comment instead of the section.
  * Run: npx tsx scripts/verify-agent-note-format.ts
  */
 import { readFileSync } from "node:fs";
@@ -13,6 +14,12 @@ const STATUS: Record<string, RegExp> = {
   implemented: /^Status: implemented$|^状态[:：] ?(?:implemented|已实现)$/,
   rejected: /^Status: rejected — .+$|^状态[:：] ?(?:rejected|已否决) — .+$/,
 };
+
+/** 导入的历史语料：文件名日期早于此值时，才允许用整行注释代替 `## Alternatives considered`。 */
+const PRE_FORMAT_CUTOFF = "2026-07-05";
+
+/** 早期笔记（备选确实无从考据）替代必填小节的那行注释；整行逐字匹配。 */
+const LEGACY_ALTERNATIVES_COMMENT = "<!-- agent-note-format: alternatives-not-recorded (pre-format Agent Note) -->";
 
 const PROBLEM_FIRST = ["## Problem", "## 问题"];
 
@@ -39,8 +46,6 @@ const BANNED_IMPLEMENTED = new Set([
 ]);
 
 const ALTERNATIVES_RE = /^## (?:Alternatives considered|.{0,8}?(?:替代方案|备选(?:方案)?))$/;
-const FORMAT_ADOPTED = "2026-07-05";
-const GRANDFATHER = "<!-- agent-note-format: alternatives-not-recorded (pre-format Agent Note) -->";
 
 /** Strip trailing parenthetical: `## Decision（说明）` → `## Decision`. */
 function headingBase(h: string): string {
@@ -141,13 +146,13 @@ for (const note of notes) {
   }
 
   const hasSection = bases.some((h: string) => ALTERNATIVES_RE.test(h));
-  const rawText = readFileSync(resolve(agentNoteRoot, note.rel), "utf8");
-  const hasGrandfather = rawText.includes(GRANDFATHER);
-  if (hasSection && hasGrandfather) fail("carries both ## Alternatives considered and grandfather comment — drop the comment");
-  if (!hasSection && !hasGrandfather) {
-    fail("missing ## Alternatives considered / ## 备选方案");
-  }
-  if (hasGrandfather && note.date >= FORMAT_ADOPTED) fail(`grandfather comment only valid before ${FORMAT_ADOPTED}`);
+  // 逐字注释按行判定，跳过代码块里的示例行。
+  const hasGrandfather = lines.some((l, i) => !src.fenced[i] && l.trim() === LEGACY_ALTERNATIVES_COMMENT);
+  if (hasSection && hasGrandfather) fail("carries both ## Alternatives considered and the alternatives-not-recorded comment — drop the comment");
+  if (!hasSection && !hasGrandfather) fail("missing ## Alternatives considered / ## 备选方案");
+  // 导入的历史语料可能只带这行注释——只在 cutoff 之前提出的笔记上放行，
+  // 否则它就成了绕开必填小节的漏洞。
+  if (hasGrandfather && note.date >= PRE_FORMAT_CUTOFF) fail(`alternatives-not-recorded comment is only valid for notes dated before ${PRE_FORMAT_CUTOFF}`);
 }
 
 if (errors.length) {
