@@ -14,6 +14,15 @@ const targetNotesDir = args[1] ? resolve(args[1]) : resolve(__dirname, '../.agen
 
 const LIFECYCLES = ['implemented', 'proposed', 'rejected', 'archived'];
 
+/** 去掉双语切换行，并把 `.zh.md` 相对链接归一化为 `.md`——导入目标是中文单语宿主。 */
+function normalizeBilingual(content: string): string {
+  return content
+    .replace(/^\[English\]\([^)]+\)\s*\|\s*中文\s*\n+/m, '')
+    .replace(/^English\s*\|\s*\[中文\]\([^)]+\)\s*\n+/m, '')
+    .replace(/^\[English\]\([^)]+\)\s*\n+/m, '')
+    .replace(/\]\(([^)#]+)\.zh\.md([#)])/g, ']($1.md$2');
+}
+
 if (!existsSync(dshNotesDir)) {
   console.error(`❌ Source dsh notes not found at: ${dshNotesDir}`);
   process.exit(1);
@@ -55,32 +64,27 @@ for (const [cleanRel, sourcePath] of noteMap.entries()) {
   const destPath = join(targetNotesDir, cleanRel);
   mkdirSync(dirname(destPath), { recursive: true });
 
-  let content = readFileSync(sourcePath, 'utf8');
-
-  // 1. 去除多余的双语切换条目，例如 `[English](xxx.md) | 中文` 或 `English | [中文](xxx.zh.md)`
-  content = content.replace(/^\[English\]\([^)]+\)\s*\|\s*中文\s*\n+/m, '');
-  content = content.replace(/^English\s*\|\s*\[中文\]\([^)]+\)\s*\n+/m, '');
-  content = content.replace(/^\[English\]\([^)]+\)\s*\n+/m, '');
-
-  // 2. 将文内所有的 `.zh.md` 相对链接归一化为标准的 `.md`（包括带有 #anchor 的链接）
-  content = content.replace(/\]\(([^)#]+)\.zh\.md([#)])/g, ']($1.md$2');
-
-  writeFileSync(destPath, content, 'utf8');
+  // 去掉双语切换行，并把文内 `.zh.md` 相对链接（含 #anchor）归一化为 `.md`
+  writeFileSync(destPath, normalizeBilingual(readFileSync(sourcePath, 'utf8')), 'utf8');
   copied++;
 }
 
-// 拷贝 README.md 和 AGENTS.md 到 .agents/notes 根目录供相对跳转
-for (const topDoc of ['README.zh.md', 'README.md', 'AGENTS.md']) {
-  const p = join(dshNotesDir, topDoc);
-  if (existsSync(p)) {
-    let topContent = readFileSync(p, 'utf8').replace(/\]\(([^)#]+)\.zh\.md([#)])/g, ']($1.md$2');
-    writeFileSync(join(targetNotesDir, topDoc === 'README.zh.md' ? 'README.md' : topDoc), topContent, 'utf8');
-  }
+// README / AGENTS.md 供笔记间相对跳转；README 只取中文版——旧写法按
+// README.zh.md → README.md → AGENTS.md 的顺序拷贝，英文版最后落盘、把中文版覆盖掉。
+for (const [src, dest] of [['README.zh.md', 'README.md'], ['AGENTS.md', 'AGENTS.md']] as const) {
+  const p = join(dshNotesDir, src);
+  if (!existsSync(p)) continue;
+  writeFileSync(join(targetNotesDir, dest), normalizeBilingual(readFileSync(p, 'utf8')), 'utf8');
 }
 
-// 自动更新归档 Note 密封清单
+// 导入的归档语料要补封印：--write 先证明既有封印未变，再追加缺失条目。
+// AGENT_NOTE_ROOT 钉住本次导入的目标目录，免得按 cwd 封印到别的树；失败静默跳过，
+// 导入后仍应跑一次 verify-notes 才算拿到证据。
 try {
-  execSync('npx tsx scripts/verify-archived-agent-notes.ts --write', { stdio: 'ignore' });
+  execSync(`npx tsx "${join(__dirname, 'verify-archived-agent-notes.ts')}" --write`, {
+    stdio: 'ignore',
+    env: { ...process.env, AGENT_NOTE_ROOT: targetNotesDir },
+  });
 } catch {}
 
 console.log(`✅ 成功将 ${copied} 篇中文 Note 标准化写入到: ${targetNotesDir}`);
