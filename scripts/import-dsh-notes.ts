@@ -81,7 +81,7 @@ for (const [src, dest] of [['README.zh.md', 'README.md'], ['AGENTS.md', 'AGENTS.
 // AGENT_NOTE_ROOT 钉住本次导入的目标目录，免得按 cwd 封印到别的树；失败静默跳过，
 // 导入后仍应跑一次 verify-notes 才算拿到证据。
 try {
-  execSync(`npx tsx "${join(__dirname, 'verify-archived-agent-notes.ts')}" --write`, {
+  execSync(`npx tsx "${join(__dirname, '../skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts')}" --write`, {
     stdio: 'ignore',
     env: { ...process.env, AGENT_NOTE_ROOT: targetNotesDir },
   });
